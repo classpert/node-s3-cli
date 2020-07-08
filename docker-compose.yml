@@ -7,6 +7,7 @@ services:
     volumes:
       - .:/app
       - ${HOME}/.aws/credentials:/home/node/.aws/credentials
+      - ${HOME}/.gitconfig:/home/node/.gitconfig
 
   npm_development:
     <<: *base
