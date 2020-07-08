@@ -1,0 +1,14 @@
+version: '3'
+services:
+  base: &base
+    image: classpert/node:1.0.0
+    ports:
+      - '8080:8080'
+    volumes:
+      - .:/app
+      - ${HOME}/.aws/credentials:/home/node/.aws/credentials
+
+  npm_development:
+    <<: *base
+    env_file:
+      - .env

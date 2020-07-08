@@ -1,51 +1,52 @@
 #!/usr/bin/env node
 
-var minimist = require('minimist');
-var osenv = require('osenv');
-var humanSize = require('human-size');
-var ini = require('ini');
-var fs = require('fs');
-var path = require('path');
-var s3 = require('s3');
-var url = require('url');
-var http = require('http');
-var https = require('https');
+var minimist = require("minimist");
+var osenv = require("osenv");
+var humanSize = require("human-size");
+var ini = require("ini");
+var fs = require("fs");
+var path = require("path");
+var s3 = require("s3");
+var AWS = require("aws-sdk");
+var http = require("http");
+var https = require("https");
 var argOptions = {
-  'default': {
-    'config': path.join(osenv.home(), '.s3cfg'),
-    'delete-removed': false,
-    'max-sockets': 20,
-    'region': 'us-east-1',
-    'default-mime-type': null,
-    'add-header': null,
+  default: {
+    config: path.join(osenv.home(), ".aws/credentials"),
+    "delete-removed": false,
+    "max-sockets": 20,
+    region: "us-east-1",
+    "default-mime-type": null,
+    "add-header": null
   },
-  'boolean': [
-    'recursive',
-    'delete-removed',
-    'insecure',
-    'acl-public',
-    'acl-private',
-    'no-guess-mime-type',
+  boolean: [
+    "recursive",
+    "delete-removed",
+    "insecure",
+    "acl-public",
+    "acl-private",
+    "no-guess-mime-type"
   ],
-  'alias': {
-    'P': 'acl-public',
-  },
+  alias: {
+    P: "acl-public"
+  }
 };
 var args = minimist(process.argv.slice(2), argOptions);
 
 var fns = {
-  'sync': cmdSync,
-  'ls': cmdList,
-  'help': cmdHelp,
-  'del': cmdDelete,
-  'put': cmdPut,
-  'get': cmdGet,
-  'cp': cmdCp,
-  'mv': cmdMv,
+  sync: cmdSync,
+  ls: cmdList,
+  help: cmdHelp,
+  del: cmdDelete,
+  put: cmdPut,
+  get: cmdGet,
+  cp: cmdCp,
+  mv: cmdMv
 };
 var USAGE_TEXT =
   "Usage: s3-cli (command) (command arguments)\n" +
-  "Commands: " + Object.keys(fns).join(" ");
+  "Commands: " +
+  Object.keys(fns).join(" ");
 var splitPathRe = /^(\/?|)([\s\S]*?)((?:\.{1,2}|[^\/]+?|)(\.[^.\/]*|))(?:[\/]*)$/;
 
 var s3UrlRe = /^[sS]3:\/\/(.*?)\/(.*)/;
@@ -53,42 +54,53 @@ barfOnUnexpectedArgs();
 
 var client;
 
-fs.readFile(args.config, {encoding: 'utf8'}, function(err, contents) {
+fs.readFile(args.config, { encoding: "utf8" }, function (err, contents) {
   if (err) {
-    if (process.env.AWS_SECRET_KEY && process.env.AWS_ACCESS_KEY) {
+    if (process.env.AWS_SECRET_ACCESS_KEY && process.env.AWS_ACCESS_KEY_ID) {
+      setup(process.env.AWS_SECRET_ACCESS_KEY, process.env.AWS_ACCESS_KEY_ID);
+    } else if (process.env.AWS_SECRET_KEY && process.env.AWS_ACCESS_KEY) {
+      // backwards compatibility with old api
       setup(process.env.AWS_SECRET_KEY, process.env.AWS_ACCESS_KEY);
     } else {
-      console.error("This utility needs a config file formatted the same as for s3cmd");
-      console.error("or AWS_SECRET_KEY and AWS_ACCESS_KEY environment variables.");
+      console.error(
+        "Missing AWS_SECRET_ACCESS_KEY and AWS_ACCESS_KEY_ID environment variables."
+      );
       process.exit(1);
     }
     return;
   }
   var config = ini.parse(contents);
-  var accessKeyId, secretAccessKey;
-  if (config && config.default) {
-    accessKeyId = config.default.access_key;
-    secretAccessKey = config.default.secret_key;
-  }
+  var accessKeyId, secretAccessKey, sessionToken;
+  var credentials =
+    config && config[process.env.AWS_CREDENTIALS_PROFILE || "default"];
+
+  accessKeyId = credentials.aws_access_key_id;
+  secretAccessKey = credentials.aws_secret_access_key;
+  sessionToken = credentials.aws_session_token;
+
   if (!secretAccessKey || !accessKeyId) {
     console.error("Config file missing access_key or secret_key");
     process.exit(1);
     return;
   }
-  setup(secretAccessKey, accessKeyId);
+  setup(secretAccessKey, accessKeyId, sessionToken);
 });
 
-function setup(secretAccessKey, accessKeyId) {
-  var maxSockets = parseInt(args['max-sockets'], 10);
+function setup(secretAccessKey, accessKeyId, sessionToken) {
+  var maxSockets = parseInt(args["max-sockets"], 10);
   http.globalAgent.maxSockets = maxSockets;
   https.globalAgent.maxSockets = maxSockets;
+  AWS.config.credentials = new AWS.Credentials({
+    accessKeyId: accessKeyId,
+    secretAccessKey: secretAccessKey,
+    ...(sessionToken ? { sessionToken: sessionToken } : {})
+  });
+
   client = s3.createClient({
-    s3Options: {
-      accessKeyId: accessKeyId,
-      secretAccessKey: secretAccessKey,
+    s3Client: new AWS.S3({
       sslEnabled: !args.insecure,
-      region: args.region,
-    },
+      region: args.region
+    })
   });
   var cmd = args._.shift();
   var fn = fns[cmd];
@@ -119,7 +131,9 @@ function cmdSync() {
     s3Params.ACL = getAcl();
     getS3Params = uploadGetS3Params;
   } else {
-    console.error("one target must be from S3, the other must be from local file system.");
+    console.error(
+      "one target must be from S3, the other must be from local file system."
+    );
     process.exit(1);
   }
   var parts = parseS3Url(s3Url);
@@ -129,11 +143,11 @@ function cmdSync() {
   parseAddHeaders(s3Params);
 
   var params = {
-    deleteRemoved: args['delete-removed'],
+    deleteRemoved: args["delete-removed"],
     getS3Params: getS3Params,
     localDir: localDir,
     s3Params: s3Params,
-    defaultContentType: getDefaultContentType(),
+    defaultContentType: getDefaultContentType()
   };
   var syncer = method.call(client, params);
   setUpProgress(syncer);
@@ -142,7 +156,7 @@ function cmdSync() {
 function uploadGetS3Params(filePath, stat, callback) {
   //console.error("Uploading", filePath);
   callback(null, {
-    ContentType: getContentType(),
+    ContentType: getContentType()
   });
 }
 
@@ -161,19 +175,19 @@ function cmdList() {
     s3Params: {
       Bucket: parts.bucket,
       Prefix: parts.key,
-      Delimiter: recursive ? null : '/',
-    },
+      Delimiter: recursive ? null : "/"
+    }
   };
   var finder = client.listObjects(params);
-  finder.on('data', function(data) {
-    data.CommonPrefixes.forEach(function(dirObject) {
+  finder.on("data", function (data) {
+    data.CommonPrefixes.forEach(function (dirObject) {
       console.log("DIR " + dirObject.Prefix);
     });
-    data.Contents.forEach(function(object) {
+    data.Contents.forEach(function (object) {
       console.log(object.LastModified + " " + object.Size + " " + object.Key);
     });
   });
-  finder.on('error', function(err) {
+  finder.on("error", function (err) {
     console.error("Error: " + err.message);
     process.exit(1);
   });
@@ -191,7 +205,7 @@ function cmdDelete() {
   function doDeleteDir() {
     var params = {
       Bucket: parts.bucket,
-      Prefix: parts.key,
+      Prefix: parts.key
     };
     var deleter = client.deleteDir(params);
     setUpProgress(deleter, true);
@@ -203,13 +217,13 @@ function cmdDelete() {
       Delete: {
         Objects: [
           {
-            Key: parts.key,
-          },
-        ],
+            Key: parts.key
+          }
+        ]
       }
     };
     var deleter = client.deleteObjects(params);
-    deleter.on('error', function(err) {
+    deleter.on("error", function (err) {
       console.error("Error: " + err.message);
       process.exit(1);
     });
@@ -221,7 +235,7 @@ function cmdPut() {
   var source = args._[0];
   var dest = args._[1];
   var parts = parseS3Url(dest);
-  if (/\/$/.test(parts.key) || parts.key == '') {
+  if (/\/$/.test(parts.key) || parts.key == "") {
     parts.key += path.basename(source);
   }
   var acl = getAcl();
@@ -229,20 +243,20 @@ function cmdPut() {
     Bucket: parts.bucket,
     Key: parts.key,
     ACL: acl,
-    ContentType: getContentType(),
+    ContentType: getContentType()
   };
   parseAddHeaders(s3Params);
   var params = {
     localFile: source,
     s3Params: s3Params,
-    defaultContentType: getDefaultContentType(),
+    defaultContentType: getDefaultContentType()
   };
   var uploader = client.uploadFile(params);
   var doneText;
-  if (acl === 'public-read') {
-    var publicUrl = args.insecure ?
-      s3.getPublicUrlHttp(parts.bucket, parts.key) :
-      s3.getPublicUrl(parts.bucket, parts.key, args.region);
+  if (acl === "public-read") {
+    var publicUrl = args.insecure
+      ? s3.getPublicUrlHttp(parts.bucket, parts.key)
+      : s3.getPublicUrl(parts.bucket, parts.key, args.region);
     doneText = "Public URL: " + publicUrl;
   } else {
     doneText = "done";
@@ -265,8 +279,8 @@ function cmdGet() {
     localFile: dest,
     s3Params: {
       Bucket: parts.bucket,
-      Key: parts.key,
-    },
+      Key: parts.key
+    }
   };
   var downloader = client.downloadFile(params);
   setUpProgress(downloader);
@@ -280,13 +294,13 @@ function cmdCp() {
   var destParts = parseS3Url(dest);
 
   var s3Params = {
-    CopySource: sourceParts.bucket + '/' + sourceParts.key,
+    CopySource: sourceParts.bucket + "/" + sourceParts.key,
     Bucket: destParts.bucket,
-    Key: destParts.key,
+    Key: destParts.key
   };
 
   var copier = client.copyObject(s3Params);
-  copier.on('error', function(err) {
+  copier.on("error", function (err) {
     console.error("Error: " + err.message);
     process.exit(1);
   });
@@ -300,13 +314,13 @@ function cmdMv() {
   var destParts = parseS3Url(dest);
 
   var s3Params = {
-    CopySource: sourceParts.bucket + '/' + sourceParts.key,
+    CopySource: sourceParts.bucket + "/" + sourceParts.key,
     Bucket: destParts.bucket,
-    Key: destParts.key,
+    Key: destParts.key
   };
 
   var mover = client.moveObject(s3Params);
-  mover.on('error', function(err) {
+  mover.on("error", function (err) {
     console.error("Error: " + err.message);
     process.exit(1);
   });
@@ -328,7 +342,7 @@ function parseS3Url(s3Url) {
   }
   return {
     bucket: match[1],
-    key: match[2],
+    key: match[2]
   };
 }
 
@@ -337,19 +351,19 @@ function isS3Url(str) {
 }
 
 function getContentType() {
-  return args['no-guess-mime-type'] ? null : undefined;
+  return args["no-guess-mime-type"] ? null : undefined;
 }
 
 function getDefaultContentType() {
-  return args['default-mime-type'] || null;
+  return args["default-mime-type"] || null;
 }
 
 function getAcl() {
   var acl = null;
-  if (args['acl-public']) {
-    acl = 'public-read';
-  } else if (args['acl-private']) {
-    acl = 'private';
+  if (args["acl-public"]) {
+    acl = "public-read";
+  } else if (args["acl-private"]) {
+    acl = "private";
   }
   return acl;
 }
@@ -360,18 +374,18 @@ function setUpProgress(o, notBytes, doneText) {
   var printFn = process.stderr.isTTY ? printProgress : noop;
   printFn();
   var progressInterval = setInterval(printFn, 100);
-  o.on('end', function() {
+  o.on("end", function () {
     clearInterval(progressInterval);
     process.stderr.write("\n" + doneText + "\n");
   });
-  o.on('error', function(err) {
+  o.on("error", function (err) {
     clearInterval(progressInterval);
     process.stderr.write("\nError: " + err.message + "\n");
     process.exit(1);
   });
 
   function printProgress() {
-    var percent = Math.floor(o.progressAmount / o.progressTotal * 100);
+    var percent = Math.floor((o.progressAmount / o.progressTotal) * 100);
     var amt = notBytes ? String(o.progressAmount) : fmtBytes(o.progressAmount);
     var total = notBytes ? String(o.progressTotal) : fmtBytes(o.progressTotal);
     var parts = [];
@@ -385,7 +399,12 @@ function setUpProgress(o, notBytes, doneText) {
       parts.push(o.deleteAmount + "/" + o.deleteTotal + " deleted");
     }
     if (o.progressMd5Amount > 0 && !o.doneMd5) {
-      parts.push(fmtBytes(o.progressMd5Amount) + "/" + fmtBytes(o.progressMd5Total) + " MD5");
+      parts.push(
+        fmtBytes(o.progressMd5Amount) +
+          "/" +
+          fmtBytes(o.progressMd5Total) +
+          " MD5"
+      );
     }
     if (o.progressTotal > 0) {
       if (!start) start = new Date();
@@ -396,7 +415,7 @@ function setUpProgress(o, notBytes, doneText) {
         var now = new Date();
         var seconds = (now - start) / 1000;
         var bytesPerSec = o.progressAmount / seconds;
-        var humanSpeed = fmtBytes(bytesPerSec) + '/s';
+        var humanSpeed = fmtBytes(bytesPerSec) + "/s";
         parts.push(humanSpeed);
       }
     }
@@ -408,7 +427,7 @@ function setUpProgress(o, notBytes, doneText) {
 }
 
 function parseAddHeaders(s3Params) {
-  var addHeaders = args['add-header'];
+  var addHeaders = args["add-header"];
   if (addHeaders) {
     if (Array.isArray(addHeaders)) {
       addHeaders.forEach(handleAddHeader);
@@ -423,7 +442,7 @@ function parseAddHeaders(s3Params) {
       process.exit(1);
     }
     var headerName = match[1];
-    var paramName = headerName.replace(/-/g, '');
+    var paramName = headerName.replace(/-/g, "");
     var paramValue = match[2];
     s3Params[paramName] = paramValue;
   }
@@ -440,7 +459,7 @@ function fmtBytes(byteCount) {
 function noop() {}
 
 function barfOnUnexpectedArgs() {
-  var validArgs = {'_': true};
+  var validArgs = { _: true };
   addValid(Object.keys(argOptions.default));
   addValid(Object.keys(argOptions.alias));
   addValid(argOptions.boolean);
@@ -459,7 +478,7 @@ function barfOnUnexpectedArgs() {
   }
 
   function addValid(array) {
-    array.forEach(function(name) {
+    array.forEach(function (name) {
       validArgs[name] = true;
     });
   }
@@ -468,11 +487,15 @@ function barfOnUnexpectedArgs() {
 function expectArgCount(min, max) {
   if (max == null) max = min;
   if (args._.length < min) {
-    console.error("Expected at least " + min + " arguments, got " + args._.length);
+    console.error(
+      "Expected at least " + min + " arguments, got " + args._.length
+    );
     process.exit(1);
   }
   if (args._.length > max) {
-    console.error("Expected at most " + max + " arguments, got " + args._.length);
+    console.error(
+      "Expected at most " + max + " arguments, got " + args._.length
+    );
     process.exit(1);
   }
 }

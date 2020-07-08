@@ -1,18 +1,18 @@
 # s3 cli
 
-Command line utility frontend to [node-s3-client](https://github.com/andrewrk/node-s3-client).
+Command line utility frontend to [node-s3-client](https://github.com/classpert/node-s3-client).
 Inspired by [s3cmd](https://github.com/s3tools/s3cmd) and attempts to be a
 drop-in replacement.
 
 ## Features
 
- * Compatible with [s3cmd](https://github.com/s3tools/s3cmd)'s config file
- * Supports a subset of s3cmd's commands and parameters
-   - including `put`, `get`, `del`, `ls`, `sync`, `cp`, `mv`
- * When syncing directories, instead of uploading one file at a time, it
-   uploads many files in parallel resulting in more bandwidth.
- * Uses multipart uploads for large files and uploads each part in parallel.
- * Retries on failure.
+- Compatible with [s3cmd](https://github.com/s3tools/s3cmd)'s config file
+- Supports a subset of s3cmd's commands and parameters
+  - including `put`, `get`, `del`, `ls`, `sync`, `cp`, `mv`
+- When syncing directories, instead of uploading one file at a time, it
+  uploads many files in parallel resulting in more bandwidth.
+- Uses multipart uploads for large files and uploads each part in parallel.
+- Retries on failure.
 
 ## Install
 
@@ -46,15 +46,15 @@ s3-cli put /path/to/source-file s3://bucket/target-file
 
 Options:
 
- * `--acl-public` or `-P` - Store objects with ACL allowing read for anyone.
- * `--default-mime-type` - Default MIME-type for stored objects. Application
-   default is `binary/octet-stream`.
- * `--no-guess-mime-type` - Don't guess MIME-type and use the default type
-   instead.
- * `--add-header=NAME:VALUE` - Add a given HTTP header to the upload request. Can be
-   used  multiple times. For instance set 'Expires' or 'Cache-Control' headers
-   (or both) using this options if you like.
- * `--region=REGION-NAME` - Specify the region (defaults to us-east-1)
+- `--acl-public` or `-P` - Store objects with ACL allowing read for anyone.
+- `--default-mime-type` - Default MIME-type for stored objects. Application
+  default is `binary/octet-stream`.
+- `--no-guess-mime-type` - Don't guess MIME-type and use the default type
+  instead.
+- `--add-header=NAME:VALUE` - Add a given HTTP header to the upload request. Can be
+  used multiple times. For instance set 'Expires' or 'Cache-Control' headers
+  (or both) using this options if you like.
+- `--region=REGION-NAME` - Specify the region (defaults to us-east-1)
 
 ### get
 
